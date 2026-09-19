@@ -3,10 +3,10 @@ import re
 def parse_score(analysis_text):
     """Extract the numeric score from the AI analysis"""
     try:
-        match = re.search(r'SCORE:\s*(\d+)', analysis_text)
+        match = re.search(r'\*{0,2}SCORE\*{0,2}:\*{0,2}\s*(\d+)', analysis_text)
         if match:
             score = int(match.group(1))
-            return min(score, 100)  # cap at 100
+            return min(score, 100)
     except:
         return 0
     return 0

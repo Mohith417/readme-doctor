@@ -1,0 +1,58 @@
+Metadata-Version: 2.4
+Name: readme-doctor
+Version: 0.1.0
+Summary: AI-powered README health checker for GitHub repositories
+Home-page: https://github.com/Mohith417/readme-doctor
+Author: Mohith417
+Requires-Python: >=3.10
+Requires-Dist: requests
+Requires-Dist: click
+Requires-Dist: python-dotenv
+Dynamic: author
+Dynamic: description
+Dynamic: home-page
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
+
+# README Doctor ðŸ©º
+
+An AI-powered CLI tool that analyzes any GitHub repository's README and gives it a health score with specific, actionable improvement suggestions.
+
+## Problem It Solves
+90% of open source projects have poor READMEs. README Doctor fetches any GitHub repo, analyzes its README using AI, scores it out of 100, and tells you exactly what to fix.
+
+## Features
+- Fetches any public GitHub repository
+- AI-powered README analysis using Groq LLM
+- Scores README quality out of 100 (A-F grade)
+- Specific issues and actionable suggestions
+- Fast CLI interface
+
+## Installation
+git clone https://github.com/Mohith417/readme-doctor.git
+cd readme-doctor
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+
+## Setup
+Create a .env file in the root folder with your Groq API key:
+GROQ_API_KEY=your_groq_api_key_here
+
+Get a free API key at https://console.groq.com
+
+## Usage
+python -m readme_doctor.cli https://github.com/any-user/any-repo
+
+## Example Output
+Score: 70/100 | Grade: C | Average README, needs work
+
+## Tech Stack
+- Python 3.13
+- Groq LLM API (free tier)
+- GitHub REST API
+- Click CLI framework
+
+## License
+MIT

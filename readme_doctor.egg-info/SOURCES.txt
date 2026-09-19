@@ -1,0 +1,14 @@
+README.md
+setup.py
+readme_doctor/__init__.py
+readme_doctor/analyzer.py
+readme_doctor/check_models.py
+readme_doctor/cli.py
+readme_doctor/fetcher.py
+readme_doctor/scorer.py
+readme_doctor.egg-info/PKG-INFO
+readme_doctor.egg-info/SOURCES.txt
+readme_doctor.egg-info/dependency_links.txt
+readme_doctor.egg-info/entry_points.txt
+readme_doctor.egg-info/requires.txt
+readme_doctor.egg-info/top_level.txt

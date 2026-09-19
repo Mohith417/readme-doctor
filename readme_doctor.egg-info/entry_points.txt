@@ -1,0 +1,2 @@
+[console_scripts]
+readme-doctor = readme_doctor.cli:main
