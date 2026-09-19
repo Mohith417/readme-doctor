@@ -16,7 +16,7 @@ def call_groq(prompt):
     }
 
     body = {
-        "model": "openai/gpt-oss-20b",
+        "model": "openai/gpt-oss-120b",
         "messages": [
             {"role": "user", "content": prompt}
         ]
@@ -53,13 +53,17 @@ Check for these things:
 README CONTENT:
 {readme_content[:3000]}
 
-Respond in this exact format:
-SCORE: (give a score out of 100)
-SUMMARY: (2-3 sentence overall summary)
+You MUST respond in this EXACT format, no exceptions:
+SCORE: [number between 0-100]
+SUMMARY: [2-3 sentences]
 ISSUES:
-- (list each specific issue found)
+- [issue 1]
+- [issue 2]
 SUGGESTIONS:
-- (list each specific improvement)
+- [suggestion 1]
+- [suggestion 2]
+
+Do not use markdown tables. Do not add extra sections. Follow the format exactly.
 """
     return call_groq(prompt)
 
