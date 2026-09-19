@@ -1,11 +1,12 @@
 import click
 from readme_doctor.fetcher import fetch_repo_data
-from readme_doctor.analyzer import analyze_readme
+from readme_doctor.analyzer import analyze_readme, generate_readme
 from readme_doctor.scorer import parse_score, get_grade
 
 @click.command()
 @click.argument('repo_url')
-def main(repo_url):
+@click.option('--generate', is_flag=True, help='Generate an improved README')
+def main(repo_url, generate):
     """README Doctor - Analyze any GitHub repo's README using AI"""
     
     click.echo(f"\n🔍 Fetching repo: {repo_url}\n")
@@ -20,7 +21,19 @@ def main(repo_url):
     click.echo(f"📝 Description: {data['description']}")
     click.echo(f"⭐ Stars: {data['stars']}")
     click.echo(f"💻 Language: {data['language']}")
-    
+
+    if generate:
+        click.echo(f"\n✨ Generating improved README...\n")
+        new_readme = generate_readme(data)
+        if new_readme is None:
+            click.echo("❌ README generation failed.")
+            return
+        filename = f"{data['name']}_improved_README.md"
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(new_readme)
+        click.echo(f"✅ Improved README saved to: {filename}")
+        return
+
     click.echo(f"\n🤖 Analyzing README with AI...\n")
     
     analysis = analyze_readme(data['readme'])
