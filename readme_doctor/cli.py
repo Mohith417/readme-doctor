@@ -25,8 +25,6 @@ def colorize_analysis(analysis_text):
             output.append(click.style(line, fg="red", bold=True))
         elif line.startswith('SUGGESTIONS:'):
             output.append(click.style(line, fg="green", bold=True))
-        elif line.startswith('- ') and 'ISSUES' in '\n'.join(output[-10:]):
-            output.append(click.style(line, fg="red"))
         elif line.startswith('- '):
             output.append(click.style(line, fg="green"))
         else:
@@ -34,12 +32,36 @@ def colorize_analysis(analysis_text):
     return '\n'.join(output)
 
 @click.command()
-@click.argument('repo_url')
+@click.argument('repo_urls', nargs=-1, required=True)
 @click.option('--generate', is_flag=True, help='Generate an improved README')
 @click.option('--score-only', is_flag=True, help='Show only the score')
-def main(repo_url, generate, score_only):
+def main(repo_urls, generate, score_only):
     """README Doctor - Analyze any GitHub repo's README using AI"""
-    
+
+    if len(repo_urls) > 1 and not score_only:
+        click.echo(click.style(f"\n📊 Analyzing {len(repo_urls)} repos...\n", fg="cyan", bold=True))
+        results = []
+        for url in repo_urls:
+            click.echo(f"🔍 Fetching: {click.style(url, fg='cyan')}")
+            data = fetch_repo_data(url)
+            if data is None:
+                click.echo(click.style(f"❌ Could not fetch {url}", fg="red"))
+                continue
+            analysis = analyze_readme(data['readme'])
+            score = parse_score(analysis)
+            grade, grade_msg = get_grade(score)
+            results.append((data['name'], score, grade))
+            click.echo(f"✅ {click.style(data['name'], bold=True)} → {colorize_score(score)} | Grade: {click.style(grade, bold=True)}")
+
+        click.echo(click.style("\n" + "="*50, fg="cyan"))
+        click.echo(click.style("📊 SUMMARY", fg="cyan", bold=True))
+        click.echo(click.style("="*50, fg="cyan"))
+        for name, score, grade in sorted(results, key=lambda x: x[1] or 0, reverse=True):
+            click.echo(f"  {click.style(name, bold=True)}: {colorize_score(score)} | {grade}")
+        return
+
+    repo_url = repo_urls[0]
+
     click.echo(f"\n🔍 Fetching repo: {click.style(repo_url, fg='cyan')}\n")
     
     data = fetch_repo_data(repo_url)
