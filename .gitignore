@@ -5,3 +5,4 @@ __pycache__/
 *.env
 readme_doctor/.env
 *.egg-info/
+*_improved_README.md
