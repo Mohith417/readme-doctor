@@ -1,0 +1,30 @@
+name: README Health Check
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  check-readme:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install readme-doctor
+      run: |
+        pip install requests click python-dotenv
+        pip install git+https://github.com/Mohith417/readme-doctor.git
+    
+    - name: Run README health check
+      env:
+        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      run: |
+        readme-doctor https://github.com/${{ github.repository }}
