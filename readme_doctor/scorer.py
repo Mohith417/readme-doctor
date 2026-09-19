@@ -1,10 +1,12 @@
+import re
+
 def parse_score(analysis_text):
     """Extract the numeric score from the AI analysis"""
     try:
-        for line in analysis_text.split('\n'):
-            if line.startswith('SCORE:'):
-                score = line.replace('SCORE:', '').strip()
-                return int(''.join(filter(str.isdigit, score)))
+        match = re.search(r'SCORE:\s*(\d+)', analysis_text)
+        if match:
+            score = int(match.group(1))
+            return min(score, 100)  # cap at 100
     except:
         return 0
     return 0
