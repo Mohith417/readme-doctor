@@ -8,11 +8,13 @@ def parse_score(analysis_text):
             score = int(match.group(1))
             return min(score, 100)
     except:
-        return 0
-    return 0
+        return None
+    return None
 
 def get_grade(score):
     """Convert numeric score to a letter grade"""
+    if score is None:
+        return "N/A", "See detailed analysis below"
     if score >= 90:
         return "A", "Excellent README!"
     elif score >= 75:
