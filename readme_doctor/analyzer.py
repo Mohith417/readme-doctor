@@ -181,6 +181,13 @@ STRICT RULES - you MUST follow these:
 4. Do NOT invent folder names, file names, or commands that don't exist
 5. If build system is unknown, say "compile manually with javac/gcc/etc"
 6. Use the real GitHub URL for clone command
+7. If this is a Python CLI project with a cli.py file, the ONLY correct commands are:
+   - readme-doctor <repo_url>
+   - readme-doctor <repo_url> --generate
+   - readme-doctor <repo_url> --score-only
+   - readme-doctor <repo_url> --token YOUR_GITHUB_TOKEN
+   - readme-doctor <url1> <url2> <url3>
+   Do NOT use --repo, --output, --verbose or any other flags that don't exist
 
 Generate a complete README.md that includes:
 1. Project title and badges

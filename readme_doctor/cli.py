@@ -1,5 +1,6 @@
 import click
 import os
+import time
 from readme_doctor.fetcher import fetch_repo_data
 from readme_doctor.analyzer import analyze_readme, generate_readme
 from readme_doctor.scorer import parse_score, get_grade
@@ -92,6 +93,8 @@ def main(repo_urls, generate, score_only, token):
             new_readme = generate_readme(data)
             if new_readme is None:
                 click.echo(click.style("❌ README generation failed.", fg="red"))
+                if best_readme:
+                    break
                 return
 
             analysis = analyze_readme(new_readme)
@@ -104,13 +107,15 @@ def main(repo_urls, generate, score_only, token):
                 best_score = score
                 best_readme = new_readme
 
-            if score is not None and score >= 85:
+            if score is not None and score >= 80:
                 click.echo(click.style(f"✅ Target score reached!", fg="green", bold=True))
                 break
 
             if attempt < max_attempts:
-                click.echo(f"⚡ Score below 85, regenerating with feedback...\n")
+                click.echo(f"⚡ Score below 80, regenerating with feedback...\n")
                 data['previous_feedback'] = analysis
+                click.echo(click.style(f"⏳ Waiting 30 seconds to avoid rate limit...", fg="yellow"))
+                time.sleep(30)
 
         filename = f"{data['name']}_improved_README.md"
         with open(filename, 'w', encoding='utf-8') as f:
