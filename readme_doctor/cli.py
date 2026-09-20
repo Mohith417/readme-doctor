@@ -40,7 +40,6 @@ def colorize_analysis(analysis_text):
 def main(repo_urls, generate, score_only, token):
     """README Doctor - Analyze any GitHub repo's README using AI"""
 
-    # Check for token in .env if not provided
     github_token = token or os.getenv("GITHUB_TOKEN")
 
     if len(repo_urls) > 1 and not score_only:
@@ -68,13 +67,13 @@ def main(repo_urls, generate, score_only, token):
     repo_url = repo_urls[0]
 
     click.echo(f"\n🔍 Fetching repo: {click.style(repo_url, fg='cyan')}\n")
-    
+
     data = fetch_repo_data(repo_url, github_token)
-    
+
     if data is None:
         click.echo(click.style("❌ Could not fetch repo. Check the URL and try again.", fg="red"))
         return
-    
+
     click.echo(f"✅ Repo: {click.style(data['name'], fg='cyan', bold=True)}")
     click.echo(f"📝 Description: {data['description']}")
     click.echo(f"⭐ Stars: {click.style(str(data['stars']), fg='yellow')}")
@@ -82,27 +81,55 @@ def main(repo_urls, generate, score_only, token):
 
     if generate:
         click.echo(f"\n✨ {click.style('Generating improved README...', fg='cyan')}\n")
-        new_readme = generate_readme(data)
-        if new_readme is None:
-            click.echo(click.style("❌ README generation failed.", fg="red"))
-            return
+
+        max_attempts = 3
+        best_readme = None
+        best_score = 0
+
+        for attempt in range(1, max_attempts + 1):
+            click.echo(f"🔄 Attempt {attempt}/{max_attempts}...")
+
+            new_readme = generate_readme(data)
+            if new_readme is None:
+                click.echo(click.style("❌ README generation failed.", fg="red"))
+                return
+
+            analysis = analyze_readme(new_readme)
+            score = parse_score(analysis)
+            grade, _ = get_grade(score)
+
+            click.echo(f"📊 Generated README score: {colorize_score(score)} | Grade: {click.style(grade, bold=True)}")
+
+            if score is not None and score > best_score:
+                best_score = score
+                best_readme = new_readme
+
+            if score is not None and score >= 85:
+                click.echo(click.style(f"✅ Target score reached!", fg="green", bold=True))
+                break
+
+            if attempt < max_attempts:
+                click.echo(f"⚡ Score below 85, regenerating with feedback...\n")
+                data['previous_feedback'] = analysis
+
         filename = f"{data['name']}_improved_README.md"
         with open(filename, 'w', encoding='utf-8') as f:
-            f.write(new_readme)
-        click.echo(click.style(f"✅ Improved README saved to: {filename}", fg="green", bold=True))
+            f.write(best_readme)
+
+        click.echo(click.style(f"\n✅ Best README (score: {best_score}/100) saved to: {filename}", fg="green", bold=True))
         return
 
     click.echo(f"\n🤖 {click.style('Analyzing README with AI...', fg='cyan')}\n")
-    
+
     analysis = analyze_readme(data['readme'])
-    
+
     if analysis is None:
         click.echo(click.style("❌ AI analysis failed. Check your API key.", fg="red"))
         return
-    
+
     score = parse_score(analysis)
     grade, grade_msg = get_grade(score)
-    
+
     if score_only:
         click.echo(f"\n🎯 Score: {colorize_score(score)} | Grade: {click.style(grade, bold=True)} | {grade_msg}\n")
         return

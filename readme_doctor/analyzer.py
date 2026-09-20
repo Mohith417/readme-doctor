@@ -51,7 +51,7 @@ Check for these things:
 8. Is the formatting clean and readable?
 
 README CONTENT:
-{readme_content[:3000]}
+{readme_content[:20000]}
 
 You MUST respond in this EXACT format, no exceptions:
 SCORE: [number between 0-100]
