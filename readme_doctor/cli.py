@@ -1,4 +1,5 @@
 import click
+import os
 from readme_doctor.fetcher import fetch_repo_data
 from readme_doctor.analyzer import analyze_readme, generate_readme
 from readme_doctor.scorer import parse_score, get_grade
@@ -35,15 +36,19 @@ def colorize_analysis(analysis_text):
 @click.argument('repo_urls', nargs=-1, required=True)
 @click.option('--generate', is_flag=True, help='Generate an improved README')
 @click.option('--score-only', is_flag=True, help='Show only the score')
-def main(repo_urls, generate, score_only):
+@click.option('--token', default=None, help='GitHub personal access token for private repos')
+def main(repo_urls, generate, score_only, token):
     """README Doctor - Analyze any GitHub repo's README using AI"""
+
+    # Check for token in .env if not provided
+    github_token = token or os.getenv("GITHUB_TOKEN")
 
     if len(repo_urls) > 1 and not score_only:
         click.echo(click.style(f"\n📊 Analyzing {len(repo_urls)} repos...\n", fg="cyan", bold=True))
         results = []
         for url in repo_urls:
             click.echo(f"🔍 Fetching: {click.style(url, fg='cyan')}")
-            data = fetch_repo_data(url)
+            data = fetch_repo_data(url, github_token)
             if data is None:
                 click.echo(click.style(f"❌ Could not fetch {url}", fg="red"))
                 continue
@@ -64,7 +69,7 @@ def main(repo_urls, generate, score_only):
 
     click.echo(f"\n🔍 Fetching repo: {click.style(repo_url, fg='cyan')}\n")
     
-    data = fetch_repo_data(repo_url)
+    data = fetch_repo_data(repo_url, github_token)
     
     if data is None:
         click.echo(click.style("❌ Could not fetch repo. Check the URL and try again.", fg="red"))
