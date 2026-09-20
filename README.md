@@ -1,4 +1,5 @@
 # README Doctor 🩺  
+
 [![README Health Check](https://github.com/Mohith417/readme-doctor/actions/workflows/readme-check.yml/badge.svg)](https://github.com/Mohith417/readme-doctor/actions/workflows/readme-check.yml)  
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)  
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
@@ -7,128 +8,132 @@
 
 ## What is README Doctor?
 
-**README Doctor** is a lightweight, AI‑powered CLI tool that inspects any GitHub repository’s `README.md`, evaluates its quality, and returns a **health score** together with concrete, actionable suggestions. When needed, it can even generate an improved version of the README automatically.
+**README Doctor** is a lightweight, AI‑powered command‑line tool that analyses any GitHub repository’s `README.md`.  
+It returns a health **score**, highlights potential issues, and can **auto‑generate** an improved version of the README.
 
----
-
-## Why does this matter?
-
-A well‑written README is the front door of an open‑source project. Unfortunately, many repositories ship with sparse, outdated, or confusing documentation, which hurts discoverability and contributor onboarding. README Doctor helps you:
-
-* Identify missing sections (installation, usage, contribution guidelines, etc.)  
-* Detect unclear language, broken links, and formatting issues  
-* Quantify overall README quality with a single score  
-* Produce a polished, AI‑enhanced rewrite in seconds  
+> **Why it matters** – A clear, well‑structured README is often the first impression of a project. README Doctor helps maintain that first impression automatically, saving time for developers and contributors.
 
 ---
 
 ## Features
 
-- **Health scoring** – a numeric score (0‑100) reflecting completeness, clarity, and best‑practice compliance.  
-- **Issue detection** – pinpoint missing headings, dead links, bad markdown, and other common pitfalls.  
-- **Auto‑generation** – with `--generate` the tool returns an AI‑crafted improved README.  
-- **Score‑only mode** – `--score-only` returns just the numeric score for CI pipelines.  
-- **GitHub token support** – pass a personal access token via `--token` to avoid rate‑limits.  
-- **Batch processing** – analyse multiple repositories in one command.  
+- **AI‑driven analysis** – Parses the README with a language model to assess readability, completeness, and structure.  
+- **Health scoring** – Produces a numeric score (0‑100) that reflects overall README quality.  
+- **Issue detection** – Highlights missing sections, vague language, and other common problems.  
+- **Auto‑generation** – Optionally creates an improved README based on the analysis.  
+- **Batch mode** – Evaluate multiple repositories in a single command.  
+- **GitHub token support** – Use a personal token to avoid rate‑limits on private or heavily‑used repositories.
+
+The core logic lives in:
+
+- `readme_doctor/analyzer.py` – interacts with the AI model and extracts issues.  
+- `readme_doctor/scorer.py` – computes the health score.  
+- `readme_doctor/fetcher.py` – fetches raw `README.md` content from a repository.  
+- `readme_doctor/cli.py` – defines the `readme-doctor` command‑line interface.
 
 ---
 
 ## Prerequisites
 
-| Requirement | Details |
-|-------------|---------|
-| **Python** | 3.10 or newer |
-| **Git** | Required only for fetching remote READMEs (handled internally) |
-| **OpenAI API key** *(optional)* | Needed for the AI‑generated rewrite (`--generate`). Set `OPENAI_API_KEY` in your environment. |
+| Requirement | Minimum version |
+|-------------|-----------------|
+| Python      | 3.10+           |
+| pip         | latest          |
+| GitHub personal access token* | — (optional, but recommended for private repos or high request volume) |
+
+\* Create a token at <https://github.com/settings/tokens> with **repo** scope.
 
 ---
 
 ## Installation
 
 ```bash
-# Clone the repository
+# 1. Clone the repository
 git clone https://github.com/Mohith417/readme-doctor.git
 cd readme-doctor
 
-# Install the required Python packages
+# 2. Install Python dependencies
 pip install -r requirements.txt
 
-# Install the package locally (adds the `readme-doctor` command)
+# 3. Install the package (adds the `readme-doctor` CLI)
 pip install .
 ```
 
-> The `setup.py` file registers a console script named **readme-doctor**, so after the last step you can run the tool from any terminal.
+*If you prefer an editable install for development:*  
+
+```bash
+pip install -e .
+```
 
 ---
 
 ## Usage
 
-### Basic health check
+The installed command is `readme-doctor`. Below are the supported invocations:
+
+| Command | Description |
+|---------|-------------|
+| `readme-doctor <repo_url>` | Analyse the README of a single repository and display the health score plus identified issues. |
+| `readme-doctor <repo_url> --generate` | Analyse **and** output an AI‑generated improved README. |
+| `readme-doctor <repo_url> --score-only` | Show only the numeric health score (no issue list). |
+| `readme-doctor <repo_url> --token YOUR_GITHUB_TOKEN` | Provide a token to avoid API rate limits. |
+| `readme-doctor <url1> <url2> <url3>` | Batch‑process multiple repositories in one call. |
+
+### Example: Basic analysis
 
 ```bash
-readme-doctor https://github.com/owner/repo
+readme-doctor https://github.com/pallets/flask
 ```
 
-### Get only the numeric score (useful for CI)
+_Output (example)_
+
+```
+🩺 README Health Score: 78/100
+Issues found:
+  • No "Installation" section
+  • License information missing
+  • Badges could be added for CI status
+```
+
+### Example: Generate a better README
 
 ```bash
-readme-doctor https://github.com/owner/repo --score-only
+readme-doctor https://github.com/pallets/flask --generate
 ```
 
-### Generate an improved README
+The command prints a full markdown document that can be saved as `README.md`.
+
+### Example: Use a personal token
 
 ```bash
-readme-doctor https://github.com/owner/repo --generate
+readme-doctor https://github.com/private/repo --token ghp_YourTokenHere
 ```
 
-### Use a personal GitHub token (avoids unauthenticated rate limits)
+### Example: Score‑only mode
 
 ```bash
-readme-doctor https://github.com/owner/repo --token YOUR_GITHUB_TOKEN
+readme-doctor https://github.com/pallets/flask --score-only
 ```
 
-### Analyze several repositories at once
+### Example: Batch processing
 
 ```bash
-readme-doctor https://github.com/owner/repo1 https://github.com/owner/repo2 https://github.com/owner/repo3
-```
-
-#### Sample output
-
-```
-Repository: owner/repo
-Health Score: 68/100
-Issues:
-  • Missing Installation section
-  • 2 broken links
-  • Bad markdown table formatting
-Suggested improvements:
-  • Add an Installation block with pip/conda instructions
-  • Replace dead links with current documentation URLs
-  • Reformat the feature table using proper markdown syntax
-```
-
-When `--generate` is used, the tool prints a full, AI‑crafted `README.md` that you can redirect to a file:
-
-```bash
-readme-doctor https://github.com/owner/repo --generate > NEW_README.md
+readme-doctor https://github.com/pallets/flask https://github.com/psf/requests https://github.com/django/django
 ```
 
 ---
 
-## Development & Testing
+## Troubleshooting
 
-The repository includes a GitHub Actions workflow (`.github/workflows/readme-check.yml`) that runs linting and basic unit tests on every push. To run the checks locally:
+| Symptom | Likely cause | Fix |
+|---------|--------------|-----|
+| `Rate limit exceeded` | Too many unauthenticated requests to the GitHub API. | Supply a personal access token via `--token`. |
+| `Repository not found` | Wrong URL or private repo without a token. | Verify the URL, and if the repo is private, add `--token`. |
+| `ImportError: No module named 'openai'` | Missing optional AI dependency. | Ensure `requirements.txt` was installed, or manually run `pip install openai`. |
+| `SSL certificate verify failed` | System missing CA certificates. | Install/update `certifi` (`pip install -U certifi`) or configure your environment’s SSL store. |
+| `Permission denied` on install | Trying to install globally without admin rights. | Use a virtual environment (`python -m venv .venv && source .venv/bin/activate`) or install with `--user`. |
 
-```bash
-# Install test dependencies (already covered by requirements.txt)
-pip install -r requirements.txt
-
-# Execute the test suite
-python -m unittest discover -s tests
-```
-
-*(If the `tests/` directory is added in the future; currently the CI ensures import sanity.)*
+If you encounter a different issue, please open an **Issue** on GitHub with the error traceback and the repository URL you were analysing.
 
 ---
 
@@ -137,14 +142,21 @@ python -m unittest discover -s tests
 Contributions are welcome! Please follow these steps:
 
 1. **Fork** the repository and create a new branch for your feature or bug‑fix.  
-2. **Write tests** for any new functionality.  
-3. Ensure the code passes the existing CI checks (`flake8`, `black`, etc.).  
-4. Submit a **Pull Request** with a clear description of the change.  
+2. Ensure you have Python 3.10+ and the development dependencies installed:
 
-For major changes, open an issue first to discuss the proposed design.
+   ```bash
+   pip install -r requirements.txt
+   pip install -e .
+   ```
+
+3. Run the test suite (if added in the future) and linting tools.  
+4. Submit a **Pull Request** with a clear description of what you changed.  
+5. Make sure your code adheres to the existing style and includes docstrings where appropriate.
+
+For major changes, open an **Issue** first to discuss the proposed modification.
 
 ---
 
 ## License
 
-This project is licensed under the **MIT License**. See the [LICENSE](https://github.com/Mohith417/readme-doctor/blob/main/LICENSE) file for details.
+This project is licensed under the **MIT License** – see the [LICENSE](LICENSE) file for details.
