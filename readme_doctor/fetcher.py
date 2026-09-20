@@ -57,12 +57,13 @@ def fetch_repo_data(repo_url, github_token=None):
             except:
                 pass
 
-    return {
+        return {
         "name": repo_data.get("name"),
+        "owner": repo_data.get("owner", {}).get("login", "unknown"),
         "description": repo_data.get("description"),
         "stars": repo_data.get("stargazers_count"),
         "language": repo_data.get("language"),
         "readme": readme_content,
-        "file_structure": file_structure[:50],  # first 50 files
+        "file_structure": file_structure[:50],
         "code_samples": code_samples
     }
