@@ -69,6 +69,16 @@ Do not use markdown tables. Do not add extra sections. Follow the format exactly
 
 
 def generate_readme(repo_data):
+    # Build file structure string
+    file_structure = repo_data.get('file_structure', [])
+    file_structure_str = '\n'.join(file_structure[:30]) if file_structure else 'Not available'
+
+    # Build code samples string
+    code_samples = repo_data.get('code_samples', {})
+    code_samples_str = ""
+    for filepath, content in code_samples.items():
+        code_samples_str += f"\n### {filepath}\n```\n{content}\n```\n"
+
     prompt = f"""
 You are a technical writer. Generate a professional, complete GitHub README.md for the following project.
 
@@ -79,15 +89,22 @@ Project Details:
 - Stars: {repo_data['stars']}
 
 Existing README (for context):
-{repo_data['readme'][:2000]}
+{repo_data['readme'][:1000]}
 
-Generate a complete, well-structured README.md that includes:
+Actual File Structure:
+{file_structure_str}
+
+Code Samples from actual files:
+{code_samples_str[:2000]}
+
+Generate a complete, well-structured README.md based on the ACTUAL code and file structure above.
+Include:
 1. Project title and badges
-2. Clear description and problem it solves
-3. Features list
+2. Clear description and problem it solves (based on actual code)
+3. Features list (based on actual code)
 4. Prerequisites
 5. Installation instructions
-6. Usage examples with code snippets
+6. Usage examples with REAL code snippets from the actual files
 7. Contributing guidelines
 8. License section
 
