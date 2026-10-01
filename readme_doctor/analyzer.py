@@ -174,6 +174,9 @@ Code Samples from actual files:
 Existing README (for context):
 {repo_data['readme'][:500]}
 
+Previous analysis feedback to address in this version:
+{repo_data.get('previous_feedback', 'None - this is the first attempt')}
+
 STRICT RULES - you MUST follow these:
 1. ONLY use commands that match the detected build system above
 2. ONLY reference files that exist in the actual file structure above
@@ -196,8 +199,9 @@ Generate a complete README.md that includes:
 4. Prerequisites
 5. Installation with REAL commands only
 6. Usage with REAL code snippets from actual files
-7. Contributing guidelines
-8. License section
+7. Troubleshooting section with common errors and fixes
+8. Contributing guidelines
+9. License section
 
 Write only the README content in markdown, nothing else.
 """
