@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>README Doctor</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🩺</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;800&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<main>
+  <h1>README Doctor</h1>
+  <p class="lede">Paste a GitHub repo. Get a score out of 100, what's missing from its README, and a rewritten README.</p>
+
+  <form id="form" autocomplete="off">
+    <label for="url">GitHub repo URL</label>
+    <div class="row">
+      <input id="url" type="text" placeholder="https://github.com/owner/repo" required>
+      <button type="submit" id="analyze">Check README</button>
+    </div>
+    <details>
+      <summary>Private repo?</summary>
+      <label for="token">GitHub token (sent for this check only, never stored)</label>
+      <input id="token" type="password" placeholder="ghp_...">
+    </details>
+  </form>
+
+  <p id="status" role="status" aria-live="polite"></p>
+
+  <section id="result" hidden>
+    <h2 id="repo-name"></h2>
+    <p id="repo-meta" class="muted"></p>
+    <div class="scorecard">
+      <div class="score"><span id="score"></span><small>/100</small></div>
+      <div class="grade"><span id="grade"></span><span id="grade-msg" class="muted"></span></div>
+      <div class="bar"><div id="bar-fill"></div></div>
+    </div>
+    <p id="summary"></p>
+    <h3>What's missing</h3>
+    <ul id="issues" class="findings issues"></ul>
+    <h3>What to add</h3>
+    <ul id="suggestions" class="findings fixes"></ul>
+    <button type="button" id="generate">Write an improved README</button>
+  </section>
+
+  <section id="generated" hidden>
+    <h2>Improved README</h2>
+    <div class="actions">
+      <button type="button" id="copy" class="ghost">Copy</button>
+      <button type="button" id="download" class="ghost">Download README.md</button>
+    </div>
+    <textarea id="readme-out" rows="22" spellcheck="false" aria-label="Improved README"></textarea>
+  </section>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  let repoName = "README";
+
+  function setStatus(message, isError) {
+    $("status").textContent = message;
+    $("status").classList.toggle("error", Boolean(isError));
+  }
+
+  async function post(path) {
+    let res;
+    try {
+      res = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: $("url").value, token: $("token").value }),
+      });
+    } catch (e) {
+      throw new Error("Can't reach the server. Check your connection and try again.");
+    }
+    let data = {};
+    try { data = await res.json(); } catch (e) { /* non-JSON reply */ }
+    if (!res.ok) throw new Error(data.error || "Something went wrong. Try again.");
+    return data;
+  }
+
+  function fillList(id, items) {
+    const list = $(id);
+    list.replaceChildren();
+    items.forEach((text) => {
+      const li = document.createElement("li");
+      li.textContent = text;          // text only, never HTML
+      list.appendChild(li);
+    });
+  }
+
+  function showResult(d) {
+    repoName = d.name || "README";
+    $("repo-name").textContent = d.name;
+    const meta = [d.language, d.stars != null ? d.stars + " stars" : null, d.description];
+    $("repo-meta").textContent = meta.filter(Boolean).join(" | ");
+    const hasScore = typeof d.score === "number";
+    $("score").textContent = hasScore ? d.score : "N/A";
+    $("grade").textContent = "Grade " + d.grade;
+    $("grade-msg").textContent = d.grade_message;
+    const fill = $("bar-fill");
+    fill.style.width = (hasScore ? Math.max(0, Math.min(100, d.score)) : 0) + "%";
+    fill.dataset.band = !hasScore ? "none" : d.score >= 75 ? "good" : d.score >= 60 ? "fair" : "poor";
+    $("summary").textContent = d.summary;
+    fillList("issues", d.issues || []);
+    fillList("suggestions", d.suggestions || []);
+    $("result").hidden = false;
+  }
+
+  $("form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    $("generated").hidden = true;
+    $("analyze").disabled = true;
+    setStatus("Reading the README and scoring it. This takes 10 to 20 seconds.");
+    try {
+      showResult(await post("/api/analyze"));
+      setStatus("");
+    } catch (err) {
+      $("result").hidden = true;
+      setStatus(err.message, true);
+    } finally {
+      $("analyze").disabled = false;
+    }
+  });
+
+  $("generate").addEventListener("click", async () => {
+    $("generate").disabled = true;
+    setStatus("Writing a new README from the repo's files. This can take up to a minute.");
+    try {
+      const d = await post("/api/generate");
+      $("readme-out").value = d.readme;
+      $("generated").hidden = false;
+      $("generated").scrollIntoView({ behavior: "smooth", block: "start" });
+      setStatus("");
+    } catch (err) {
+      setStatus(err.message, true);
+    } finally {
+      $("generate").disabled = false;
+    }
+  });
+
+  $("copy").addEventListener("click", async () => {
+    const box = $("readme-out");
+    try { await navigator.clipboard.writeText(box.value); }
+    catch (e) { box.select(); document.execCommand("copy"); }
+    $("copy").textContent = "Copied";
+    setTimeout(() => { $("copy").textContent = "Copy"; }, 1500);
+  });
+
+  $("download").addEventListener("click", () => {
+    const blob = new Blob([$("readme-out").value], { type: "text/markdown" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = repoName + "_README.md";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+</script>
+</body>
+</html>
