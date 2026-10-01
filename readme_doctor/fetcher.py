@@ -1,11 +1,53 @@
 import requests
 import base64
+from urllib.parse import urlparse
 
-def fetch_repo_data(repo_url, github_token=None):
-    # Extract owner and repo name from URL
-    parts = repo_url.rstrip('/').split('/')
-    owner = parts[-2]
-    repo = parts[-1]
+
+class RepoFetchError(Exception):
+    """Raised when a repo can't be fetched (only if raise_errors=True)."""
+
+
+def parse_repo_url(repo_url):
+    """Return (owner, repo). Accepts a trailing slash, .git, and /tree/... links."""
+    url = repo_url.strip()
+    if "://" not in url:
+        url = "https://" + url
+    parsed = urlparse(url)
+    if parsed.netloc.lower() not in ("github.com", "www.github.com"):
+        raise RepoFetchError("That doesn't look like a GitHub URL. Use https://github.com/owner/repo")
+    parts = [p for p in parsed.path.split("/") if p]
+    if len(parts) < 2:
+        raise RepoFetchError("The URL needs an owner and a repo name, like https://github.com/owner/repo")
+    owner, repo = parts[0], parts[1]
+    if repo.endswith(".git"):
+        repo = repo[:-4]
+    return owner, repo
+
+
+def explain_status(status):
+    if status == 404:
+        return "Repo not found. Check the URL, or add a GitHub token if the repo is private."
+    if status == 401:
+        return "GitHub rejected the token. Check that it is correct and has not expired."
+    if status == 403:
+        return "GitHub refused the request. You may have hit the rate limit. Add a GitHub token and try again."
+    return f"GitHub returned status {status}."
+
+
+def _fail(message, raise_errors):
+    if raise_errors:
+        raise RepoFetchError(message)
+    print(f"Error: {message}")
+    return None
+
+
+def fetch_repo_data(repo_url, github_token=None, raise_errors=False):
+    # raise_errors=False (CLI): print the error and return None, as before.
+    # raise_errors=True (web app): raise RepoFetchError with a readable message.
+    try:
+        owner, repo = parse_repo_url(repo_url)
+    except RepoFetchError as e:
+        return _fail(str(e), raise_errors)
 
     api_base = f"https://api.github.com/repos/{owner}/{repo}"
     
@@ -16,8 +58,7 @@ def fetch_repo_data(repo_url, github_token=None):
     # Fetch repo info
     repo_response = requests.get(api_base, headers=headers)
     if repo_response.status_code != 200:
-        print(f"Error: Could not fetch repo. Status code: {repo_response.status_code}")
-        return None
+        return _fail(explain_status(repo_response.status_code), raise_errors)
 
     repo_data = repo_response.json()
 
@@ -57,7 +98,7 @@ def fetch_repo_data(repo_url, github_token=None):
             except:
                 pass
 
-        return {
+    return {
         "name": repo_data.get("name"),
         "owner": repo_data.get("owner", {}).get("login", "unknown"),
         "description": repo_data.get("description"),
