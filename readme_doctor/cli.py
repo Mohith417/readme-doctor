@@ -2,7 +2,7 @@ import click
 import os
 import time
 from readme_doctor.fetcher import fetch_repo_data
-from readme_doctor.analyzer import analyze_readme, generate_readme
+from readme_doctor.analyzer import analyze_readme, describe_read_report, generate_readme
 from readme_doctor.scorer import parse_score, get_grade
 
 def colorize_score(score):
@@ -52,7 +52,7 @@ def main(repo_urls, generate, score_only, token):
             if data is None:
                 click.echo(click.style(f"❌ Could not fetch {url}", fg="red"))
                 continue
-            analysis = analyze_readme(data['readme'])
+            analysis = analyze_readme(data['readme'], data['file_structure'], data['code_samples'])
             score = parse_score(analysis)
             grade, grade_msg = get_grade(score)
             results.append((data['name'], score, grade))
@@ -90,14 +90,16 @@ def main(repo_urls, generate, score_only, token):
         for attempt in range(1, max_attempts + 1):
             click.echo(f"🔄 Attempt {attempt}/{max_attempts}...")
 
-            new_readme = generate_readme(data)
+            new_readme = generate_readme(data, progress=lambda m: click.echo(click.style(f"   {m}", fg="cyan")))
+            if data.get("read_report"):
+                click.echo(f"📚 {describe_read_report(data['read_report'])}")
             if new_readme is None:
                 click.echo(click.style("❌ README generation failed.", fg="red"))
                 if best_readme:
                     break
                 return
 
-            analysis = analyze_readme(new_readme)
+            analysis = analyze_readme(new_readme, data['file_structure'], data['code_samples'])
             score = parse_score(analysis)
             grade, _ = get_grade(score)
 
@@ -117,6 +119,9 @@ def main(repo_urls, generate, score_only, token):
                 click.echo(click.style(f"⏳ Waiting 30 seconds to avoid rate limit...", fg="yellow"))
                 time.sleep(30)
 
+        if best_readme is None:      # every attempt scored 0: still save the last one instead of crashing
+            best_readme = new_readme
+
         filename = f"{data['name']}_improved_README.md"
         with open(filename, 'w', encoding='utf-8') as f:
             f.write(best_readme)
@@ -126,7 +131,7 @@ def main(repo_urls, generate, score_only, token):
 
     click.echo(f"\n🤖 {click.style('Analyzing README with AI...', fg='cyan')}\n")
 
-    analysis = analyze_readme(data['readme'])
+    analysis = analyze_readme(data['readme'], data['file_structure'], data['code_samples'])
 
     if analysis is None:
         click.echo(click.style("❌ AI analysis failed. Check your API key.", fg="red"))

@@ -1,5 +1,6 @@
 import os
 import time
+from collections import Counter
 
 import requests
 from dotenv import load_dotenv
@@ -24,6 +25,8 @@ GENERATION_OVERHEAD_CHARS = 3000
 CONDENSE_CHUNK_CHARS = 6000         # size of each piece when a README is too long for one request
 MAX_CONDENSE_CALLS = 6              # READMEs up to ~36,000 characters are read completely
 MIN_CODE_CHARS = 1500               # room always kept for source files
+DEEP_BATCH_CHARS = 6000             # source files are read by the AI in pieces of this size
+MAX_DEEP_CALLS = 8                  # up to ~48,000 characters of source are read completely
 
 MESSAGES = {
     "no_key": "The AI key (GROQ_API_KEY) is not set.",
@@ -198,6 +201,118 @@ def _prepare_readme(readme, limit, cache):
     return notes, "README CONTENT (too long for one request, so the AI first read every part and wrote these notes)"
 
 
+def _batch_files(code_samples, size):
+    """Lay the files (best first) end to end in batches of about `size` characters.
+    A file that does not fit in the space left is continued in the next batch, so no space is wasted."""
+    batches, current, length = [], [], 0
+    for path, text in code_samples.items():
+        part, rest = 0, text
+        while rest:
+            space = size - length
+            if space < 200 and current:
+                batches.append(current)
+                current, length = [], 0
+                space = size
+            if len(rest) <= space:
+                piece, rest = rest, ""
+            else:
+                cut = rest.rfind("\n", 0, space)
+                cut = cut + 1 if cut > 0 else space
+                piece, rest = rest[:cut], rest[cut:]
+            part += 1
+            label = path if (part == 1 and not rest) else f"{path} (part {part})"
+            current.append((path, label, piece))
+            length += len(piece)
+    if current:
+        batches.append(current)
+    return batches
+
+
+def _batch_text(batch):
+    return "\n".join(f"### {label}\n```\n{piece}\n```" for _, label, piece in batch)
+
+
+def _read_whole_repo(code_samples, budget, start, time_limit, progress):
+    """Make the repo's source known to the AI within `budget` characters.
+    Small repos go in word for word. Bigger ones are read by the AI in passes, keeping rolling notes.
+    Returns (text, report, error_kind, detail)."""
+    note = progress or (lambda message: None)
+    total = sum(len(path) + len(text) + 20 for path, text in code_samples.items())
+    if total <= budget:
+        text, stats = pack_context(code_samples, budget)
+        return text, {"files": len(code_samples), "mode": "verbatim", "ai_passes": 0, **stats}, None, ""
+
+    all_batches = _batch_files(code_samples, DEEP_BATCH_CHARS)
+    planned = all_batches[:MAX_DEEP_CALLS]
+    cap = max(800, int(budget * 0.8))
+    notes, done, stopped = "", 0, False
+    for number, batch in enumerate(planned, 1):
+        if time_limit is not None and number > 1 and time.monotonic() - start > time_limit:
+            stopped = True
+            break
+        note(f"Reading the source files, pass {number} of {len(planned)}...")
+        prompt = f"""
+You are reading a software project's source files to collect facts for its README.
+
+Notes so far (from the earlier files):
+{notes or '(none yet)'}
+
+NEW FILES (pass {number} of {len(planned)}):
+{_batch_text(batch)}
+
+Write the UPDATED notes covering the earlier notes AND the new files, in at most {cap} characters.
+Keep exact names. Cover: what the project does, entry points, commands and flags, environment variables,
+configuration, dependencies, routes or endpoints, how to run and test. Output only the notes.
+"""
+        reply, kind, detail = _post_groq(prompt, 0)
+        if kind:
+            return None, None, kind, detail
+        notes = reply.strip()
+        if len(notes) > cap:
+            notes = _fit_text(notes, cap)[0]
+        done += 1
+
+    parts_read = Counter(path for batch in planned[:done] for path, _, _ in batch)
+    parts_total = Counter(path for batch in all_batches for path, _, _ in batch)
+    covered = {path for path in parts_read if parts_read[path] == parts_total[path]}   # read from start to end
+    rest = {path: text for path, text in code_samples.items() if path not in covered}
+    if rest:
+        rest_text, stats = pack_context(rest, max(0, budget - len(notes) - 120))
+    else:
+        rest_text, stats = "", {"full": 0, "outline": 0, "skipped": 0}
+    text = f"Notes written by the AI after reading {len(covered)} source files completely:\n{notes}\n{rest_text}"
+    report = {"files": len(code_samples), "mode": "notes", "ai_passes": done,
+              "read_completely": len(covered) + stats["full"], "outline_only": stats["outline"],
+              "skipped": stats["skipped"], "stopped_early": stopped}
+    return text, report, None, ""
+
+
+def describe_read_report(report):
+    """One plain sentence (or two) saying what the AI actually read."""
+    if not report:
+        return ""
+    files = report.get("files", 0)
+    if report.get("mode") == "verbatim":
+        full, outline, skipped = report.get("full", 0), report.get("outline", 0), report.get("skipped", 0)
+        if outline or skipped:
+            text = (f"The AI read {full} of {files} source files in full, {outline} as outlines, "
+                    f"and {skipped} not at all (size limit).")
+        else:
+            text = f"The AI read all {files} source files in full."
+    else:
+        text = (f"The AI read {report['read_completely']} of {files} source files completely, "
+                f"in {report['ai_passes']} passes.")
+        if report.get("outline_only"):
+            text += f" {report['outline_only']} more were read as outlines."
+        if report.get("skipped"):
+            text += f" {report['skipped']} were not included (size limit)."
+        if report.get("stopped_early"):
+            text += " It stopped early to stay within the time limit; the command line tool does a complete read."
+    if report.get("readme_condensed"):
+        text += " The old README was too long for one request, so every part was read and condensed."
+    return text
+
+
 def _strip_fence(text):
     """Remove a ```markdown ... ``` wrapper if the AI added one around the whole answer."""
     lines = text.strip().splitlines()
@@ -365,8 +480,11 @@ def detect_project_info(file_structure, code_samples):
     }
 
 
-def generate_readme(repo_data, raise_errors=False):
-    """Write an improved README. raise_errors=True raises AIServiceError instead of printing."""
+def generate_readme(repo_data, raise_errors=False, progress=None, time_limit=None):
+    """Write an improved README. raise_errors=True raises AIServiceError instead of printing.
+    progress(message) is called while the source files are being read. time_limit (seconds) makes the
+    repo reading stop early (the web app uses this). What was read is stored in repo_data["read_report"]."""
+    start = time.monotonic()
     file_structure = repo_data.get("file_structure") or []
     code_samples = repo_data.get("code_samples") or {}
     project_info = detect_project_info(file_structure, code_samples)
@@ -374,14 +492,27 @@ def generate_readme(repo_data, raise_errors=False):
     name = repo_data.get("name") or "the project"
     url = f"https://github.com/{repo_data.get('owner', 'unknown')}/{name}"
 
-    cache = {}
+    # Repeated attempts on the same repo share one reading; a different README or file set starts fresh.
+    signature = (len(old_readme), tuple((path, len(text)) for path, text in code_samples.items()))
+    cache = repo_data.get("_read_cache")
+    if not cache or cache.get("signature") != signature:
+        cache = {"signature": signature}
+        repo_data["_read_cache"] = cache
 
     def build_prompt(scale):
         budget = max(3000, int((input_budget_chars(GENERATION_RESERVE_TOKENS) - GENERATION_OVERHEAD_CHARS) * scale))
         structure = ("\n".join(file_structure[:100]) or "Not available")[:1200]
         readme_text, readme_label = _prepare_readme(
             old_readme, max(500, budget - len(structure) - MIN_CODE_CHARS), cache)
-        code_text, _ = pack_context(code_samples, max(0, budget - len(readme_text) - len(structure)))
+        code_budget = max(0, budget - len(readme_text) - len(structure))
+        if "repo" not in cache:
+            cache["repo"] = _read_whole_repo(code_samples, code_budget, start, time_limit, progress)
+        code_text, report, kind, detail = cache["repo"]
+        if kind:
+            raise _PrepError(kind, detail)
+        if len(code_text) > code_budget:                 # only when retrying with a smaller budget
+            code_text = _fit_text(code_text, code_budget)[0]
+        cache["report"] = report
         return f"""
 You are a technical writer. Generate a professional, complete GitHub README.md for the following project.
 
@@ -403,7 +534,7 @@ DETECTED PROJECT STRUCTURE (use this for accurate commands):
 Actual File Structure:
 {structure}
 
-Source files from the repository (most important first):
+What the repository's source files contain (most important first):
 {code_text or 'Not available'}
 
 {readme_label} - it may be outdated or wrong; trust the source files over it:
@@ -442,4 +573,5 @@ Write only the README content in markdown, nothing else.
             raise AIServiceError(MESSAGES[kind])
         print(f"Error: {detail or MESSAGES[kind]}")
         return None
+    repo_data["read_report"] = dict(cache.get("report") or {}, readme_condensed="notes" in cache)
     return _strip_fence(text)

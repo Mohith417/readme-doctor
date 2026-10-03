@@ -48,6 +48,7 @@
 
   <section id="generated" hidden>
     <h2>Improved README</h2>
+    <p id="read-note" class="muted"></p>
     <div class="actions">
       <button type="button" id="copy" class="ghost">Copy</button>
       <button type="button" id="download" class="ghost">Download README.md</button>
@@ -132,6 +133,7 @@
     try {
       const d = await post("/api/generate");
       $("readme-out").value = d.readme;
+      $("read-note").textContent = d.read_note || "";
       $("generated").hidden = false;
       $("generated").scrollIntoView({ behavior: "smooth", block: "start" });
       setStatus("");

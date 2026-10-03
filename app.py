@@ -4,14 +4,18 @@ from collections import defaultdict
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
+from werkzeug.exceptions import HTTPException
 
 from readme_doctor.fetcher import fetch_repo_data, RepoFetchError
-from readme_doctor.analyzer import analyze_readme, generate_readme
+from readme_doctor.analyzer import AIServiceError, analyze_readme, describe_read_report, generate_readme
 from readme_doctor.scorer import parse_score, get_grade
 
 load_dotenv()
 
 app = Flask(__name__)
+
+# Reading a big repo takes several AI passes on the free plan; stop early so the page never times out.
+WEB_TIME_LIMIT = int(os.getenv("WEB_TIME_LIMIT", "60"))
 
 # --- Simple rate limit: protects the free Groq quota (8000 tokens/minute) ---
 WINDOW_SECONDS = 60
@@ -71,6 +75,19 @@ def get_input():
     return url, token, None
 
 
+@app.errorhandler(Exception)
+def handle_error(error):
+    """Always answer the page's requests with JSON, never with a raw error page or a traceback."""
+    if isinstance(error, HTTPException):
+        if request.path.startswith("/api/"):
+            return jsonify(error=error.description), error.code
+        return error
+    app.logger.exception("Unexpected error")
+    if request.path.startswith("/api/"):
+        return jsonify(error="Something went wrong on the server. Please try again."), 500
+    return "Something went wrong on the server.", 500
+
+
 @app.get("/")
 def index():
     return render_template("index.html")
@@ -96,9 +113,8 @@ def api_analyze():
     except Exception:
         return jsonify(error="Could not reach GitHub. Try again in a moment."), 502
 
-    analysis = analyze_readme(data["readme"])
-    if analysis is None:
-        return jsonify(error="The AI service did not respond. It may be busy. Try again in a minute."), 502
+    # The score always comes back; if the AI is unavailable the summary says so.
+    analysis = analyze_readme(data["readme"], data["file_structure"], data["code_samples"])
 
     score = parse_score(analysis)
     grade, grade_message = get_grade(score)
@@ -133,10 +149,11 @@ def api_generate():
         return jsonify(error="Could not reach GitHub. Try again in a moment."), 502
 
     # One generation pass only: the CLI loop waits 30s between tries, which a web request can't.
-    readme = generate_readme(data)
-    if readme is None:
-        return jsonify(error="The AI service did not respond. It may be busy. Try again in a minute."), 502
-    return jsonify(readme=readme, name=data["name"])
+    try:
+        readme = generate_readme(data, raise_errors=True, time_limit=WEB_TIME_LIMIT)
+    except AIServiceError as e:
+        return jsonify(error=str(e)), 502
+    return jsonify(readme=readme, name=data["name"], read_note=describe_read_report(data.get("read_report")))
 
 
 if __name__ == "__main__":

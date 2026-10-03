@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import patch
 
 import app as webapp
+from readme_doctor.analyzer import AIServiceError
 from readme_doctor.fetcher import RepoFetchError
 
 # The exact report format your CLI printed for pallets/click.
@@ -71,7 +72,7 @@ class Routes(WebTestCase):
         with patch("app.fetch_repo_data", return_value=FAKE_REPO), \
              patch("app.generate_readme", return_value="# New README"):
             r = self.client.post("/api/generate", json=URL)
-        self.assertEqual(r.json, {"readme": "# New README", "name": "click"})
+        self.assertEqual(r.json, {"readme": "# New README", "name": "click", "read_note": ""})
 
 
 class Errors(WebTestCase):
@@ -92,15 +93,38 @@ class Errors(WebTestCase):
         self.assertEqual(r.status_code, 502)
         self.assertIn("Could not reach GitHub", r.json["error"])
 
-    def test_ai_down_on_analyze_and_generate(self):
+    def test_writer_down_gives_the_ai_services_own_message(self):
+        busy = "The AI service is busy (free-plan limit reached). Wait a minute and try again."
         with patch("app.fetch_repo_data", return_value=FAKE_REPO), \
-             patch("app.analyze_readme", return_value=None), \
-             patch("app.generate_readme", return_value=None):
-            a = self.client.post("/api/analyze", json=URL)
-            g = self.client.post("/api/generate", json=URL)
-        for r in (a, g):
-            self.assertEqual(r.status_code, 502)
-            self.assertIn("AI service did not respond", r.json["error"])
+             patch("app.generate_readme", side_effect=AIServiceError(busy)):
+            r = self.client.post("/api/generate", json=URL)
+        self.assertEqual((r.status_code, r.json["error"]), (502, busy))
+
+    def test_analysis_receives_the_repo_files_and_code(self):
+        repo = dict(FAKE_REPO, file_structure=["LICENSE", "app.py"], code_samples={"app.py": "print(1)"})
+        with patch("app.fetch_repo_data", return_value=repo), \
+             patch("app.analyze_readme", return_value=REAL_REPORT) as analyze:
+            self.client.post("/api/analyze", json=URL)
+        analyze.assert_called_once_with("# click", ["LICENSE", "app.py"], {"app.py": "print(1)"})
+
+    def test_writer_is_asked_to_raise_errors_not_print_them(self):
+        with patch("app.fetch_repo_data", return_value=FAKE_REPO), \
+             patch("app.generate_readme", return_value="# New") as generate:
+            self.client.post("/api/generate", json=URL)
+        self.assertEqual(generate.call_args.kwargs, {"raise_errors": True, "time_limit": webapp.WEB_TIME_LIMIT})
+
+    def test_unexpected_crash_returns_clean_json_without_details(self):
+        with patch("app.fetch_repo_data", return_value=FAKE_REPO), \
+             patch("app.generate_readme", side_effect=ValueError("secret-detail")):
+            r = self.client.post("/api/generate", json=URL)
+        self.assertEqual(r.status_code, 500)
+        self.assertIn("Something went wrong", r.json["error"])
+        self.assertNotIn("secret-detail", r.get_data(as_text=True))
+
+    def test_wrong_method_on_api_returns_json(self):
+        r = self.client.get("/api/analyze")
+        self.assertEqual(r.status_code, 405)
+        self.assertIn("error", r.json)
 
     def test_rate_limit_blocks_the_sixth_request(self):
         codes = [self.client.post("/api/analyze", json={}).status_code for _ in range(7)]

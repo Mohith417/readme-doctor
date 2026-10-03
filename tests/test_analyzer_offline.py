@@ -87,10 +87,19 @@ class Reliability(Env):
         self.assertEqual(len(fake.bodies), analyzer.MAX_ATTEMPTS)
 
     def test_too_large_retries_with_less_content(self):
-        repo = dict(self.REPO, code_samples={f"f{i}.py": "def work():\n    pass\n" * 3000 for i in range(10)})
-        fake = FakeGroq(FakeResp(413, text="Request too large"), FakeResp(200, "# New"))
-        self.assertEqual(self.run_with(fake, generate_readme, repo), "# New")
-        self.assertLess(len(fake.prompts[1]), len(fake.prompts[0]))
+        repo = dict(self.REPO, code_samples={f"f{i}.py": "def work():\n    pass\n" * 25 for i in range(10)})
+        finals = []
+
+        def post(url, headers=None, json=None, timeout=None):
+            prompt = json["messages"][0]["content"]
+            if "Generate a complete README.md" in prompt:
+                finals.append(prompt)
+                return FakeResp(413, text="Request too large") if len(finals) == 1 else FakeResp(200, "# New")
+            return FakeResp(200, "NOTES: short")
+
+        self.assertEqual(self.run_with(post, generate_readme, repo), "# New")
+        self.assertEqual(len(finals), 2)
+        self.assertLess(len(finals[1]), len(finals[0]))
 
     def test_always_too_large_gives_clear_error(self):
         fake = FakeGroq(FakeResp(413, text="Request too large"))
