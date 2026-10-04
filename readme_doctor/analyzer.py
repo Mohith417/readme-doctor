@@ -6,6 +6,7 @@ from collections import Counter
 import requests
 from dotenv import load_dotenv
 
+from readme_doctor.factcheck import check_readme, describe_fact_check, format_findings
 from readme_doctor.fetcher import input_budget_chars, pack_context
 from readme_doctor.rubric import evaluate_readme
 from readme_doctor.rubric import issues as rubric_issues
@@ -327,7 +328,8 @@ def describe_read_report(report):
             text += " It stopped early to stay within the time limit; the command line tool does a complete read."
     if report.get("readme_condensed"):
         text += " The old README was too long for one request, so every part was read and condensed."
-    return text
+    checked = describe_fact_check(report.get("fact_check"))
+    return f"{text} {checked}" if checked else text
 
 
 def _strip_fence(text):
@@ -516,7 +518,10 @@ def generate_readme(repo_data, raise_errors=False, progress=None, time_limit=Non
         cache = {"signature": signature}
         repo_data["_read_cache"] = cache
 
+    fix_notes = [""]                                  # filled in if the fact-check finds unsupported claims
+
     def build_prompt(scale):
+        feedback = "\n".join(x for x in (repo_data.get("previous_feedback"), fix_notes[0]) if x) or "None - this is the first attempt"
         budget = max(3000, int((input_budget_chars(GENERATION_RESERVE_TOKENS) - GENERATION_OVERHEAD_CHARS) * scale))
         structure = ("\n".join(file_structure[:100]) or "Not available")[:1200]
         readme_text, readme_label = _prepare_readme(
@@ -558,7 +563,7 @@ What the repository's source files contain (most important first):
 {readme_text}
 
 Previous analysis feedback to address in this version:
-{repo_data.get('previous_feedback', 'None - this is the first attempt')}
+{feedback}
 
 STRICT RULES - you MUST follow these:
 1. ONLY use commands that match the detected build system above
@@ -591,5 +596,21 @@ Write only the README content in markdown, nothing else.
             raise AIServiceError(MESSAGES[kind])
         print(f"Error: {detail or MESSAGES[kind]}")
         return None
-    repo_data["read_report"] = dict(cache.get("report") or {}, readme_condensed="notes" in cache)
-    return _strip_fence(text)
+    text = _strip_fence(text)
+
+    # Fact-check the new README against the repo's files; one correction pass if something is unsupported.
+    findings, checked = check_readme(text, repo_data)
+    fixed = False
+    if findings and not (time_limit is not None and time.monotonic() - start > time_limit):
+        fix_notes[0] = format_findings(findings)
+        retry, retry_kind, _ = _ask_ai(build_prompt, temperature=0.3)
+        if not retry_kind:
+            fixed = True
+            retry = _strip_fence(retry)
+            retry_findings, retry_checked = check_readme(retry, repo_data)
+            if len(retry_findings) <= len(findings):         # keep whichever version is better supported
+                text, findings, checked = retry, retry_findings, retry_checked
+    repo_data["read_report"] = dict(
+        cache.get("report") or {}, readme_condensed="notes" in cache,
+        fact_check={"checked": checked, "unverified": [f._asdict() for f in findings], "fixed": fixed})
+    return text
