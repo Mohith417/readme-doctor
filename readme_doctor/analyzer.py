@@ -1,3 +1,4 @@
+import logging
 import os
 import time
 from collections import Counter
@@ -11,6 +12,8 @@ from readme_doctor.rubric import issues as rubric_issues
 from readme_doctor.rubric import suggestions as rubric_suggestions
 
 load_dotenv()
+
+log = logging.getLogger("readme_doctor")
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 MODEL = "openai/gpt-oss-120b"
@@ -32,6 +35,7 @@ MESSAGES = {
     "no_key": "The AI key (GROQ_API_KEY) is not set.",
     "bad_key": "The AI key was rejected. Check that GROQ_API_KEY is correct.",
     "rate_limit": "The AI service is busy (free-plan limit reached). Wait a minute and try again.",
+    "daily_limit": "The AI's free daily limit has been used up. It resets within about a day, so please try again later.",
     "too_large": "This repo is too large for the AI's size limit, even after trimming.",
     "network": "Could not reach the AI service. Check the connection and try again.",
     "empty": "The AI returned an empty answer. Try again.",
@@ -57,6 +61,17 @@ def _wait_seconds(response):
     except (TypeError, ValueError):
         wait = 10
     return max(1, min(wait, MAX_WAIT_SECONDS))
+
+
+def _is_daily_limit(response):
+    """True when Groq says the DAILY quota is gone (waiting a minute will not help)."""
+    text = response.text.lower()
+    if "per day" in text or "(tpd)" in text or "(rpd)" in text:
+        return True
+    try:
+        return float(response.headers.get("retry-after", 0)) > 120
+    except (TypeError, ValueError):
+        return False
 
 
 def _post_groq(prompt, temperature):
@@ -94,6 +109,8 @@ def _post_groq(prompt, temperature):
             return None, "bad_key", detail
         if status == 413 or (status == 429 and "request too large" in lowered):
             return None, "too_large", detail
+        if status == 429 and _is_daily_limit(response):
+            return None, "daily_limit", detail
         if status == 429:
             last_kind, last_detail = "rate_limit", detail
             if attempt < MAX_ATTEMPTS - 1:
@@ -569,6 +586,7 @@ Write only the README content in markdown, nothing else.
 
     text, kind, detail = _ask_ai(build_prompt, temperature=0.3)
     if kind:
+        log.warning("AI request failed (%s): %s", kind, detail)     # the technical reason, for the server log
         if raise_errors:
             raise AIServiceError(MESSAGES[kind])
         print(f"Error: {detail or MESSAGES[kind]}")

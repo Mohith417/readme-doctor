@@ -75,7 +75,7 @@ class Reliability(Env):
         self.sleep.assert_called_once_with(7.0)
 
     def test_wait_time_is_capped(self):
-        fake = FakeGroq(FakeResp(429, headers={"retry-after": "500"}, text="rate limit"), FakeResp(200, "# New"))
+        fake = FakeGroq(FakeResp(429, headers={"retry-after": "100"}, text="rate limit"), FakeResp(200, "# New"))
         self.run_with(fake, generate_readme, self.REPO)
         self.sleep.assert_called_once_with(float(analyzer.MAX_WAIT_SECONDS))
 
