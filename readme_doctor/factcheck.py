@@ -11,6 +11,7 @@ PATH_RE = re.compile(r"^[\w.\-/]+\.(?:py|js|ts|tsx|jsx|java|go|rs|rb|php|cs|cpp|
 FLAG_RE = re.compile(r"(?<![\w-])(--[a-zA-Z][\w-]*)")
 ENV_RE = re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")
 LINK_RE = re.compile(r"\]\(([^)\s]+)\)")
+HTML_LINK_RE = re.compile(r"""(?:src|href)\s*=\s*["']([^"']+)["']""", re.I)
 GITHUB_RE = re.compile(r"github\.com/([\w.-]+)/([\w.-]+)")
 
 THIRD_PARTY = {"pip", "pip3", "git", "npm", "npx", "yarn", "pnpm", "docker", "docker-compose", "curl", "wget",
@@ -90,7 +91,7 @@ def check_readme(readme, repo_data):
         if " " not in span and PATH_RE.match(span) and not _is_placeholder_path(span):
             claim("file", span, _exists(span, paths, dirs, names))
     for line in prose:
-        for target in LINK_RE.findall(line):
+        for target in LINK_RE.findall(line) + HTML_LINK_RE.findall(line):
             target = target.split("#")[0].split("?")[0]
             if target and "://" not in target and not target.startswith(("mailto:", "tel:", "data:", "/")) \
                     and not _is_placeholder_path(target):

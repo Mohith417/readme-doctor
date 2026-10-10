@@ -1,4 +1,5 @@
 import logging
+import re
 import os
 import time
 from collections import Counter
@@ -7,7 +8,9 @@ import requests
 from dotenv import load_dotenv
 
 from readme_doctor.factcheck import check_readme, describe_fact_check, format_findings
+from readme_doctor.facts import extract_facts, format_facts, product_files
 from readme_doctor.fetcher import input_budget_chars, pack_context
+from readme_doctor.layout import build_badges, build_tree
 from readme_doctor.rubric import evaluate_readme
 from readme_doctor.rubric import issues as rubric_issues
 from readme_doctor.rubric import suggestions as rubric_suggestions
@@ -19,18 +22,21 @@ log = logging.getLogger("readme_doctor")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 MODEL = "openai/gpt-oss-120b"
 REQUEST_TIMEOUT = 90
-MAX_ATTEMPTS = 3
+MAX_ATTEMPTS = 5
 MAX_WAIT_SECONDS = 20
+TOKENS_PER_MINUTE = 7000            # Groq free tier allows 8000; keep a safety margin
+_recent_calls = {}                  # model -> [(time, tokens)] of calls in the last 60 seconds
+READ_MODEL = "openai/gpt-oss-20b"   # reading + condensing use their own free token budget
 
 ANALYSIS_RESERVE_TOKENS = 2500      # room kept for instructions + the AI's answer
 ANALYSIS_OVERHEAD_CHARS = 2200
-GENERATION_RESERVE_TOKENS = 4500
-GENERATION_OVERHEAD_CHARS = 3000
+GENERATION_RESERVE_TOKENS = 4000     # (the style guide made the fixed instructions longer, so the
+GENERATION_OVERHEAD_CHARS = 4500     #  overhead went up and the output reserve down: same room for content)
 CONDENSE_CHUNK_CHARS = 6000         # size of each piece when a README is too long for one request
-MAX_CONDENSE_CALLS = 6              # READMEs up to ~36,000 characters are read completely
+MAX_CONDENSE_CALLS = 2              # READMEs up to ~36,000 characters are read completely
 MIN_CODE_CHARS = 1500               # room always kept for source files
 DEEP_BATCH_CHARS = 6000             # source files are read by the AI in pieces of this size
-MAX_DEEP_CALLS = 8                  # up to ~48,000 characters of source are read completely
+MAX_DEEP_CALLS = 2                  # up to ~48,000 characters of source are read completely
 
 MESSAGES = {
     "no_key": "The AI key (GROQ_API_KEY) is not set.",
@@ -61,7 +67,7 @@ def _wait_seconds(response):
         wait = float(response.headers.get("retry-after", 10))
     except (TypeError, ValueError):
         wait = 10
-    return max(1, min(wait, MAX_WAIT_SECONDS))
+    return max(12, min(wait, MAX_WAIT_SECONDS))
 
 
 def _is_daily_limit(response):
@@ -75,7 +81,20 @@ def _is_daily_limit(response):
         return False
 
 
-def _post_groq(prompt, temperature):
+def _throttle(prompt, model):
+    """Wait until sending this prompt stays under this model's per-minute token limit."""
+    calls = _recent_calls.setdefault(model, [])
+    needed = min(len(prompt) // 3 + 2500, TOKENS_PER_MINUTE)
+    while True:
+        now = time.monotonic()
+        calls[:] = [(t, n) for t, n in calls if now - t < 60]
+        if sum(n for _, n in calls) + needed <= TOKENS_PER_MINUTE:
+            calls.append((now, needed))
+            return
+        time.sleep(max(1, 60 - (now - calls[0][0]) + 0.5))
+
+
+def _post_groq(prompt, temperature, model=MODEL):
     """Return (text, error_kind, detail). error_kind is None on success."""
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
@@ -83,12 +102,13 @@ def _post_groq(prompt, temperature):
 
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     body = {
-        "model": MODEL,
+        "model": model,
         "temperature": temperature,
         "messages": [{"role": "user", "content": prompt}],
     }
     last_kind, last_detail = "other", ""
     for attempt in range(MAX_ATTEMPTS):
+        _throttle(prompt, model)
         try:
             response = requests.post(GROQ_URL, headers=headers, json=body, timeout=REQUEST_TIMEOUT)
         except requests.RequestException as exc:
@@ -101,7 +121,7 @@ def _post_groq(prompt, temperature):
             except (ValueError, KeyError, IndexError, TypeError):
                 content = None
             if content and content.strip():
-                return content, None, ""
+                return re.sub(r"<think>.*?</think>", "", content, flags=re.S).strip(), None, ""
             return None, "empty", "the AI returned an empty reply"
 
         detail = f"{status} - {response.text[:300]}"
@@ -197,7 +217,7 @@ Remove filler words and repetition. Aim for about 30% of the original length. Ou
 README PART {number}/{len(chunks)}:
 {chunk}
 """
-            reply, kind, detail = _post_groq(prompt, 0)
+            reply, kind, detail = _post_groq(prompt, 0, READ_MODEL)
             if kind:
                 return None, kind, detail
             notes.append(reply.strip())
@@ -282,7 +302,7 @@ Write the UPDATED notes covering the earlier notes AND the new files, in at most
 Keep exact names. Cover: what the project does, entry points, commands and flags, environment variables,
 configuration, dependencies, routes or endpoints, how to run and test. Output only the notes.
 """
-        reply, kind, detail = _post_groq(prompt, 0)
+        reply, kind, detail = _post_groq(prompt, 0, READ_MODEL)
         if kind:
             return None, None, kind, detail
         notes = reply.strip()
@@ -378,6 +398,7 @@ def analyze_readme(readme_content, file_structure=None, code_samples=None):
     unavailable the report is still returned, with a note in the summary.
     """
     file_structure = list(file_structure or [])
+    code_samples = product_files(code_samples)
     result = evaluate_readme(readme_content, file_structure)
     score = result["score"]
     found_issues = rubric_issues(result)
@@ -436,7 +457,7 @@ Do not use markdown tables. Do not add other sections.
 
 def detect_project_info(file_structure, code_samples):
     """Detect real project info from actual files"""
-    
+
     # Detect build system
     build_system = "unknown"
     build_file = ""
@@ -505,7 +526,9 @@ def generate_readme(repo_data, raise_errors=False, progress=None, time_limit=Non
     repo reading stop early (the web app uses this). What was read is stored in repo_data["read_report"]."""
     start = time.monotonic()
     file_structure = repo_data.get("file_structure") or []
-    code_samples = repo_data.get("code_samples") or {}
+    all_code = repo_data.get("code_samples") or {}
+    facts_text = format_facts(extract_facts(all_code))   # read by code from every file, instantly
+    code_samples = product_files(all_code)               # the AI reads only product files, not tests
     project_info = detect_project_info(file_structure, code_samples)
     old_readme = repo_data.get("readme") or ""
     name = repo_data.get("name") or "the project"
@@ -526,6 +549,8 @@ def generate_readme(repo_data, raise_errors=False, progress=None, time_limit=Non
         structure = ("\n".join(file_structure[:100]) or "Not available")[:1200]
         readme_text, readme_label = _prepare_readme(
             old_readme, max(500, budget - len(structure) - MIN_CODE_CHARS), cache)
+        badges = "\n".join(build_badges(repo_data)) or "(none - add no badges)"
+        tree = build_tree(file_structure, name) if file_structure else "(not available)"
         code_budget = max(0, budget - len(readme_text) - len(structure))
         if "repo" not in cache:
             cache["repo"] = _read_whole_repo(code_samples, code_budget, start, time_limit, progress)
@@ -559,6 +584,8 @@ Actual File Structure:
 What the repository's source files contain (most important first):
 {code_text or 'Not available'}
 
+{facts_text}
+
 {readme_label} - it may be outdated or wrong; trust the source files over it:
 {readme_text}
 
@@ -574,17 +601,20 @@ STRICT RULES - you MUST follow these:
 6. Use the real GitHub URL for the clone command
 7. ONLY mention command-line flags, options, environment variables and URLs that appear in the source files above
 8. Keep what is correct in the existing README (purpose, working badges, useful sections) and improve the rest
+9. Troubleshooting rows must describe errors this code can really produce (for example a missing GROQ_API_KEY, a GitHub rate limit, repository not found, or the AI service being busy). Do NOT add generic rows about pip, SSL certificates, certifi, --user or the openai package.
+10. State a default value for an environment variable only if it is visible in the source files; in example .env files use clear placeholders, never invented numbers.
 
-Generate a complete README.md that includes:
-1. Project title and badges
-2. Clear description and problem it solves
-3. Features list based on actual code
-4. Prerequisites
-5. Installation with REAL commands only
-6. Usage with REAL code snippets from actual files
-7. Troubleshooting section with common errors and fixes
-8. Contributing guidelines
-9. License section
+Generate a complete README.md following this style guide (follow it, but never invent facts):
+- Open with a centered header block: <div align="center">, the project title as an H1, a one-line tagline, then these badges exactly as written (add no others):
+{badges}
+  then </div>.
+- Use H2 headings, each with one fitting emoji: ✨ Features, 📦 Installation, 🚀 Usage, ⚙️ Configuration (only if the source files define settings), 🗂️ Project structure, 🛠️ Troubleshooting, 🤝 Contributing, 📄 License.
+- Features: a short list or table where every item is grounded in the source files.
+- Installation and Usage: real commands only, each in its own code block. Put prerequisites at the start of Installation.
+- Project structure: put this tree in a code block exactly as written. You may add a short comment after a file name only when its purpose is clear from the source files:
+{tree}
+- Put long optional material, such as troubleshooting, inside <details><summary>...</summary> blocks.
+- Short paragraphs. No marketing filler such as "powerful", "seamless" or "cutting-edge".
 
 Write only the README content in markdown, nothing else.
 """

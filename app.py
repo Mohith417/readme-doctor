@@ -15,7 +15,7 @@ load_dotenv()
 app = Flask(__name__)
 
 # Reading a big repo takes several AI passes on the free plan; stop early so the page never times out.
-WEB_TIME_LIMIT = int(os.getenv("WEB_TIME_LIMIT", "60"))
+WEB_TIME_LIMIT = int(os.getenv("WEB_TIME_LIMIT", "1800"))
 
 # --- Simple rate limit: protects the free Groq quota (8000 tokens/minute) ---
 WINDOW_SECONDS = 60
